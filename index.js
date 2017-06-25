@@ -1,169 +1,89 @@
-const required = []
-const observables = [
-  'bindCallback',
-  'bindNodeCallback',
-  'combineLatest',
-  'concat',
-  'defer',
-  'empty',
-  'forkJoin',
-  'from',
-  'fromEvent',
-  'fromEventPattern',
-  'fromPromise',
-  'generate',
-  'if',
-  'interval',
-  'merge',
-  'never',
-  'of',
-  'onErrorResumeNext',
-  'pairs',
-  'race',
-  'range',
-  'throw',
-  'timer',
-  'using',
-  'zip',
-]
-const operators = [
-  'audit',
-  'auditTime',
-  'buffer',
-  'bufferCount',
-  'bufferTime',
-  'bufferToggle',
-  'bufferWhen',
-  'catch',
-  'combineAll',
-  'combineLatest',
-  'concat',
-  'concatAll',
-  'concatMap',
-  'concatMapTo',
-  'count',
-  'debounce',
-  'debounceTime',
-  'defaultIfEmpty',
-  'delay',
-  'delayWhen',
-  'dematerialize',
-  'distinct',
-  'distinctUntilChanged',
-  'distinctUntilKeyChanged',
-  'do',
-  'elementAt',
-  'every',
-  'exhaust',
-  'exhaustMap',
-  'expand',
-  'filter',
-  'finally',
-  'find',
-  'findIndex',
-  'first',
-  'groupBy',
-  'ignoreElements',
-  'isEmpty',
-  'last',
-  'let',
-  'map',
-  'mapTo',
-  'materialize',
-  'max',
-  'merge',
-  'mergeAll',
-  'mergeMap',
-  'mergeMapTo',
-  'mergeScan',
-  'min',
-  'multicast',
-  'observeOn',
-  'onErrorResumeNext',
-  'pairwise',
-  'partition',
-  'pluck',
-  'publish',
-  'publishBehavior',
-  'publishLast',
-  'publishReplay',
-  'race',
-  'reduce',
-  'repeat',
-  'repeatWhen',
-  'retry',
-  'retryWhen',
-  'sample',
-  'sampleTime',
-  'scan',
-  'sequenceEqual',
-  'share',
-  'shareReplay',
-  'single',
-  'skip',
-  'skipLast',
-  'skipUntil',
-  'skipWhile',
-  'startWith',
-  'subscribeOn',
-  'switch',
-  'switchMap',
-  'switchMapTo',
-  'take',
-  'takeLast',
-  'takeUntil',
-  'takeWhile',
-  'throttle',
-  'throttleTime',
-  'timeInterval',
-  'timeout',
-  'timeoutWith',
-  'timestamp',
-  'toArray',
-  'toPromise',
-  'window',
-  'windowCount',
-  'windowTime',
-  'windowToggle',
-  'windowWhen',
-  'withLatestFrom',
-  'zip',
-  'zipAll',
-]
+// const observables = require('./observables.js')
+const operators = require('./operators.js')
+
+const requiredOperators = []
 
 module.exports = function (babel) {
   var t = babel.types
 
   function addRequired (path, name) {
-    if (required.indexOf(name) !== -1) return
-    required.push(name)
     path.findParent(p => p.isProgram())
       .unshiftContainer('body', t.ImportDeclaration([], t.StringLiteral(name)))
   }
 
-  function addObservable (path, name) {
-    addRequired(path, 'rxjs/add/observable/' + name)
-  }
-
   function addOperator (path, name) {
+    console.log(`Adding ${name}`)
+    requiredOperators.push(name)
     addRequired(path, 'rxjs/add/operator/' + name)
   }
 
-  function checkIdentifier (path, node) {
-    if (!t.isIdentifier(node, { name: 'source' })) return false
-    addOperator(path, path.node.name)
-    return true
+  const checkComments = path => {
+    if (!path) return false
+    const comments = path.node.leadingComments
+    if (!comments) return false
+    console.log(comments.map(comment => comment.value))
+    for (let i = 0; i < comments.length; i++) {
+      const comment = comments[i].value.trim()
+      if (comment.startsWith('@type') && comment.includes('Observable')) return true
+    }
+    return false
+  }
+
+  const getIdentifier = node => {
+    if (t.isIdentifier(node)) return node
+
+    while (node.isCallExpression()) {
+      node = node.get('callee.object')
+    }
+    return node
+  }
+
+  const checkIdentifier = path => {
+    const identifier = getIdentifier(path)
+    if (!identifier || !identifier.node) return false
+
+    if (identifier.node.name === 'Observable') return true
+
+    const scope = path.scope.getBinding(identifier.node.name)
+    if (scope && performChecks(scope.path)) return true
+  }
+
+  const performChecks = path => {
+
+    //
+    // Check expressions
+    //
+
+    const expression = path.findParent(p => p.isExpressionStatement())
+    if (expression) {
+      if (checkComments(expression)) return true
+      if (checkIdentifier(expression.get('expression'))) return true
+    }
+
+
+    //
+    // Check variable declarations
+    //
+
+    const declaration = path.findParent(p => p.isVariableDeclaration())
+    if (declaration) {
+      if (path.node.name === 'mergeMap') console.log(declaration.node)
+      if (checkComments(declaration)) return true
+      if (checkIdentifier(declaration.get('init'))) return true
+    }
   }
 
   return {
     visitor: {
       Identifier (path) {
-        if (operators.indexOf(path.node.name) === -1) return
 
-        if (t.isMemberExpression(path.parent) && checkIdentifier(path, path.parent)) return
+        // Fail if it's not an operator
+        if (!operators.includes(path.node.name)) return
 
-        var declarator = path.findParent(p => p.isVariableDeclarator())
-        if (declarator && checkIdentifier(path, declarator.node.id)) return
+        // Fail it it's already required
+        if (requiredOperators.includes(path.node.name)) return
+
+        if (performChecks(path)) addOperator(path, path.node.name)
       }
     }
   }
