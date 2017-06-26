@@ -41,5 +41,15 @@ source.doSomething()
 ```js
 // @type {Observable}
 const source = someFunctionThatReturnsAnObservable()
+
+/**
+ * @type {Observable}
+ */
+const source = someFunctionThatReturnsAnObservable()
 ```
+
+## TODO:
+* Tests
+* Tests
+* Tests
 

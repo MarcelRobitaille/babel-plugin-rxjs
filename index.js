@@ -1,58 +1,149 @@
-// const observables = require('./observables.js')
+const flatten = require('./flatten.js')
+
+const observables = require('./observables.js')
 const operators = require('./operators.js')
 
 const requiredOperators = []
+const requiredObservables = []
 
 module.exports = function (babel) {
   var t = babel.types
 
-  function addRequired (path, name) {
+
+  /**
+   * Add required and import to the top of the program
+   *
+   * @param {NodePath} path
+   * @param {String} file The file to include
+   */
+
+  function addImport (path, file) {
+    // Find program
     path.findParent(p => p.isProgram())
-      .unshiftContainer('body', t.ImportDeclaration([], t.StringLiteral(name)))
+      // Add import declaration at top level
+      .unshiftContainer('body', t.ImportDeclaration([], t.StringLiteral(file)))
   }
 
+
+  /**
+   * Add a needed operator
+   *
+   * @param {NodePath} path
+   * @param {String} name Name of the operator
+   */
+
   function addOperator (path, name) {
-    console.log(`Adding ${name}`)
+    // Push to requiredImports to save on processing if we see it again
     requiredOperators.push(name)
-    addRequired(path, 'rxjs/add/operator/' + name)
+    // Add import declaration
+    addImport(path, 'rxjs/add/operator/' + name)
   }
+
+
+  /**
+   * Add a needed observable constructor
+   *
+   * @param {NodePath} path
+   * @param {String} name Name of the observable
+   */
+
+  function addObservable (path, name) {
+    // Push to requiredImports to save on processing if we see it again
+    requiredOperators.push(name)
+    // Add import declaration
+    addImport(path, 'rxjs/add/observable/' + name)
+  }
+
+
+  /**
+   * Check if a path's leading comments define it as an observable
+   *
+   * @param {NodePath} path
+   */
 
   const checkComments = path => {
     if (!path) return false
-    const comments = path.node.leadingComments
+
+    let comments = path.node.leadingComments
     if (!comments) return false
-    console.log(comments.map(comment => comment.value))
+
+    // Format comments
+    comments = flatten(comments
+      .map(comment =>
+        comment.value
+          // Replace out stuff we don't need
+          .replace(/[*\s]/g, '')
+          // Split up multiline comments
+          .split('\n')
+      ))
+
+    // Check each leading comment to see if it follows the pattern '@type {Observable}'
     for (let i = 0; i < comments.length; i++) {
-      const comment = comments[i].value.trim()
+      const comment = comments[i].trim()
       if (comment.startsWith('@type') && comment.includes('Observable')) return true
     }
     return false
   }
 
-  const getIdentifier = node => {
-    if (t.isIdentifier(node)) return node
+
+  /**
+   * Look for at node's callee.object until an identifier is found
+   *
+   * @param {CallExpression} node starting point
+   * @returns {Identifier|null} most deeply nested callee.object
+   */
+
+  const getIdentifierFromCallExpression = node => {
 
     while (node.isCallExpression()) {
       node = node.get('callee.object')
     }
-    return node
+
+    if (t.isIdentifier(node)) return node
+
+    return null
   }
+
+
+  /**
+   * Check if a CallExpression is an observable by checking it's Identifier
+   *
+   * @param {CallExpression} node
+   * @returns {Boolean} Determines success
+   */
 
   const checkIdentifier = path => {
-    const identifier = getIdentifier(path)
+
+    // Get what we're a method on
+    const identifier = getIdentifierFromCallExpression(path)
     if (!identifier || !identifier.node) return false
 
+    // If it's literally 'Observable.us', success!
     if (identifier.node.name === 'Observable') return true
 
+    // >>> Otherwise, we have to determine based on scope
     const scope = path.scope.getBinding(identifier.node.name)
-    if (scope && performChecks(scope.path)) return true
+    // Run the same checks again on the scope's path
+    if (scope !== path && performChecks(scope.path)) return true
+    // <<<
+
+    return false
   }
+
+
+  /**
+   * Check if path is an observable
+   *
+   * @param {Identifier} path
+   * @returns {Boolean} Determines success
+   */
 
   const performChecks = path => {
 
-    //
-    // Check expressions
-    //
+
+    /**
+     * Check expressions
+     */
 
     const expression = path.findParent(p => p.isExpressionStatement())
     if (expression) {
@@ -61,13 +152,12 @@ module.exports = function (babel) {
     }
 
 
-    //
-    // Check variable declarations
-    //
+    /**
+     * Check variable declarations
+     */
 
     const declaration = path.findParent(p => p.isVariableDeclaration())
     if (declaration) {
-      if (path.node.name === 'mergeMap') console.log(declaration.node)
       if (checkComments(declaration)) return true
       if (checkIdentifier(declaration.get('init'))) return true
     }
@@ -77,13 +167,25 @@ module.exports = function (babel) {
     visitor: {
       Identifier (path) {
 
-        // Fail if it's not an operator
-        if (!operators.includes(path.node.name)) return
+        // If we're dealing with an operator
+        if (operators.includes(path.node.name)) {
 
-        // Fail it it's already required
-        if (requiredOperators.includes(path.node.name)) return
+          // Fail it it's already required
+          if (requiredOperators.includes(path.node.name)) return
 
-        if (performChecks(path)) addOperator(path, path.node.name)
+          // If it is a method on an observable, add the operator
+          if (performChecks(path)) return addOperator(path, path.node.name)
+        }
+
+        // If we're dealing with an observable
+        if (observables.includes(path.node.name)) {
+
+          // Fail it it's already required
+          if (requiredObservables.includes(path.node.name)) return
+
+          // If it is a method on an observable, add the operator
+          if (performChecks(path)) return addObservable(path, path.node.name)
+        }
       }
     }
   }

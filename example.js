@@ -11,7 +11,11 @@
 export const init = () => {
   notifier.notify('Getting messages...')
 
-  // @type {Observable}
+  Observable.fromEvent()
+
+  /*
+   * @type {Observable}
+   */
   const source = getMessages({
     maxResults: 10,
     userId: 'me',

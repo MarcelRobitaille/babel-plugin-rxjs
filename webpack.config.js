@@ -1,7 +1,6 @@
 module.exports = {
   entry: {
-    // example: './example.js',
-    example: '/home/marcel/code/apollo/source/js/messages/messages.js',
+    example: './example.js',
   },
   output: {
     filename: 'output.js',
