@@ -1,10 +1,12 @@
 const flatten = require('./flatten.js')
 
-const observables = require('./observables.js')
 const operators = require('./operators.js')
+const observables = require('./observables.js')
+const domObservables = require('./dom-observables.js')
 
 const requiredOperators = []
 const requiredObservables = []
+const requiredDomObservables = []
 
 module.exports = function (babel) {
   var t = babel.types
@@ -52,6 +54,13 @@ module.exports = function (babel) {
     requiredOperators.push(name)
     // Add import declaration
     addImport(path, 'rxjs/add/observable/' + name)
+  }
+
+  function addDomObservable (path, name) {
+    // Push to requiredImports to save on processing if we see it again
+    requiredOperators.push(name)
+    // Add import declaration
+    addImport(path, 'rxjs/add/observable/dom/' + name)
   }
 
 
@@ -124,7 +133,7 @@ module.exports = function (babel) {
     // >>> Otherwise, we have to determine based on scope
     const scope = path.scope.getBinding(identifier.node.name)
     // Run the same checks again on the scope's path
-    if (scope !== path && performChecks(scope.path)) return true
+    if (scope !== path && isObservable(scope.path)) return true
     // <<<
 
     return false
@@ -138,7 +147,7 @@ module.exports = function (babel) {
    * @returns {Boolean} Determines success
    */
 
-  const performChecks = path => {
+  const isObservable = path => {
 
 
     /**
@@ -163,29 +172,28 @@ module.exports = function (babel) {
     }
   }
 
+
+
+  const performChecks = ({ path, list, reqList, addFn }) => {
+
+
+    if (!list.includes(path.node.name)) return
+
+    // Fail it it's already required
+    if (reqList.includes(path.node.name)) return
+
+    // If it is a method on an observable, add it
+    if (isObservable(path)) return addFn(path, path.node.name)
+  }
+
   return {
     visitor: {
       Identifier (path) {
 
-        // If we're dealing with an operator
-        if (operators.includes(path.node.name)) {
+        performChecks({ path, list: operators, reqList: requiredOperators, addFn: addOperator })
+        performChecks({ path, list: observables, reqList: requiredObservables, addFn: addObservable })
+        performChecks({ path, list: domObservables, reqList: requiredDomObservables, addFn: addDomObservable })
 
-          // Fail it it's already required
-          if (requiredOperators.includes(path.node.name)) return
-
-          // If it is a method on an observable, add the operator
-          if (performChecks(path)) return addOperator(path, path.node.name)
-        }
-
-        // If we're dealing with an observable
-        if (observables.includes(path.node.name)) {
-
-          // Fail it it's already required
-          if (requiredObservables.includes(path.node.name)) return
-
-          // If it is a method on an observable, add the operator
-          if (performChecks(path)) return addObservable(path, path.node.name)
-        }
       }
     }
   }
