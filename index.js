@@ -4,9 +4,23 @@ const operators = require('./operators.js')
 const observables = require('./observables.js')
 const domObservables = require('./dom-observables.js')
 
-const requiredOperators = []
-const requiredObservables = []
-const requiredDomObservables = []
+const types = {
+  operator: operators,
+  observable: observables,
+  domObersvable: domObservables,
+}
+
+const required = {
+  operator: [],
+  observable: [],
+  domObersvable: [],
+}
+
+const filePaths = {
+  operator: 'operator',
+  observable: 'observable',
+  domObersvable: 'observabel/dom',
+}
 
 module.exports = function (babel) {
   var t = babel.types
@@ -28,50 +42,13 @@ module.exports = function (babel) {
 
 
   /**
-   * Add a needed operator
-   *
-   * @param {NodePath} path
-   * @param {String} name Name of the operator
-   */
-
-  function addOperator (path, name) {
-    // Push to requiredImports to save on processing if we see it again
-    requiredOperators.push(name)
-    // Add import declaration
-    addImport(path, 'rxjs/add/operator/' + name)
-  }
-
-
-  /**
-   * Add a needed observable constructor
-   *
-   * @param {NodePath} path
-   * @param {String} name Name of the observable
-   */
-
-  function addObservable (path, name) {
-    // Push to requiredImports to save on processing if we see it again
-    requiredOperators.push(name)
-    // Add import declaration
-    addImport(path, 'rxjs/add/observable/' + name)
-  }
-
-  function addDomObservable (path, name) {
-    // Push to requiredImports to save on processing if we see it again
-    requiredOperators.push(name)
-    // Add import declaration
-    addImport(path, 'rxjs/add/observable/dom/' + name)
-  }
-
-
-  /**
    * Check if a path's leading comments define it as an observable
    *
    * @param {NodePath} path
    */
 
   const checkComments = path => {
-    if (!path) return false
+    if (!path || !path.node) return false
 
     let comments = path.node.leadingComments
     if (!comments) return false
@@ -104,7 +81,7 @@ module.exports = function (babel) {
 
   const getIdentifierFromCallExpression = node => {
 
-    while (node.isCallExpression()) {
+    while (t.isCallExpression(node)) {
       node = node.get('callee.object')
     }
 
@@ -123,8 +100,10 @@ module.exports = function (babel) {
 
   const checkIdentifier = path => {
 
+    const callExpression = path.get('object')
+
     // Get what we're a method on
-    const identifier = getIdentifierFromCallExpression(path)
+    const identifier = getIdentifierFromCallExpression(callExpression)
     if (!identifier || !identifier.node) return false
 
     // If it's literally 'Observable.us', success!
@@ -149,50 +128,42 @@ module.exports = function (babel) {
 
   const isObservable = path => {
 
-
-    /**
-     * Check expressions
-     */
-
-    const expression = path.findParent(p => p.isExpressionStatement())
+    const expression = path.findParent(p => p.isMemberExpression())
     if (expression) {
+
+      // Check expression member's comments
       if (checkComments(expression)) return true
-      if (checkIdentifier(expression.get('expression'))) return true
+
+      // Check expression member's most deeply nested identifier
+      if (checkIdentifier(expression)) return true
     }
 
-
-    /**
-     * Check variable declarations
-     */
-
-    const declaration = path.findParent(p => p.isVariableDeclaration())
-    if (declaration) {
-      if (checkComments(declaration)) return true
-      if (checkIdentifier(declaration.get('init'))) return true
-    }
+    return false
   }
 
 
 
-  const performChecks = ({ path, list, reqList, addFn }) => {
+  const performChecks = ({ path, name }) => {
 
-
-    if (!list.includes(path.node.name)) return
+    if (!types[name].includes(path.node.name)) return
 
     // Fail it it's already required
-    if (reqList.includes(path.node.name)) return
+    if (required[name].includes(path.node.name)) return
 
     // If it is a method on an observable, add it
-    if (isObservable(path)) return addFn(path, path.node.name)
+    if (isObservable(path)) {
+      required[name].push(path.node.name)
+      addImport(path, `rxjs/${filePaths[name]}/${path.node.name}.js`)
+    }
   }
 
   return {
     visitor: {
       Identifier (path) {
 
-        performChecks({ path, list: operators, reqList: requiredOperators, addFn: addOperator })
-        performChecks({ path, list: observables, reqList: requiredObservables, addFn: addObservable })
-        performChecks({ path, list: domObservables, reqList: requiredDomObservables, addFn: addDomObservable })
+        performChecks({ path, name: 'operator' })
+        performChecks({ path, name: 'observable' })
+        performChecks({ path, name: 'domObersvable' })
 
       }
     }
